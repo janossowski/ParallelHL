@@ -1787,31 +1787,6 @@ static std::uint64_t estimate_selected_label_bytes(
     return total;
 }
 
-static std::uint64_t query_result_fingerprint(
-    Vertex source,
-    Vertex target,
-    const QueryResult& result) {
-
-    const std::uint64_t distance_value =
-        result.distance == INF
-            ? 0xffffffffffffffffULL
-            : static_cast<std::uint64_t>(result.distance);
-
-    const std::uint64_t hub_value =
-        result.hub == std::numeric_limits<Vertex>::max()
-            ? 0xffffffffULL
-            : static_cast<std::uint64_t>(result.hub);
-
-    std::uint64_t value =
-        (static_cast<std::uint64_t>(source) << 32) ^
-        static_cast<std::uint64_t>(target);
-
-    value ^= mix_query_value(distance_value);
-    value ^= mix_query_value(hub_value + 0x632be59bd9b4e019ULL);
-
-    return mix_query_value(value);
-}
-
 static void print_query_result(
     Vertex source,
     Vertex target,
@@ -2082,11 +2057,11 @@ static void run_many_to_many_queries_cpu(
                         target_labels[
                             static_cast<std::size_t>(target_index)]);
 
-                local_checksum ^=
-                    query_result_fingerprint(
+                local_checksum +=
+                    distance_result_fingerprint(
                         sources[static_cast<std::size_t>(source_index)],
                         targets[static_cast<std::size_t>(target_index)],
-                        result);
+                        result.distance);
 
                 if (result.distance == INF) {
                     ++local_unreachable;
@@ -2132,11 +2107,11 @@ static void run_many_to_many_queries_cpu(
                         forward,
                         target_labels[target_index]);
 
-                local_checksum ^=
-                    query_result_fingerprint(
+                local_checksum +=
+                    distance_result_fingerprint(
                         sources[source_index],
                         targets[target_index],
-                        result);
+                        result.distance);
 
                 if (result.distance == INF) {
                     ++local_unreachable;
@@ -2163,7 +2138,7 @@ static void run_many_to_many_queries_cpu(
     std::uint64_t unreachable_count = 0;
 
     for (std::size_t i = 0; i < worker_checksums.size(); ++i) {
-        checksum ^= worker_checksums[i];
+        checksum += worker_checksums[i];
         unreachable_count += worker_unreachable[i];
     }
 
@@ -2519,33 +2494,6 @@ __device__ __forceinline__ unsigned long long cuda_distance_fingerprint(
     return cuda_mix_query_value(value);
 }
 
-__device__ __forceinline__ unsigned long long cuda_query_fingerprint(
-    Vertex source,
-    Vertex target,
-    Weight distance,
-    Vertex hub) {
-
-    const unsigned long long distance_value =
-        distance == INF
-            ? 0xffffffffffffffffULL
-            : static_cast<unsigned long long>(distance);
-
-    const unsigned long long hub_value =
-        hub == 0xffffffffU
-            ? 0xffffffffULL
-            : static_cast<unsigned long long>(hub);
-
-    unsigned long long value =
-        (static_cast<unsigned long long>(source) << 32) ^
-        static_cast<unsigned long long>(target);
-
-    value ^= cuda_mix_query_value(distance_value);
-    value ^= cuda_mix_query_value(
-        hub_value + 0x632be59bd9b4e019ULL);
-
-    return cuda_mix_query_value(value);
-}
-
 __device__ __forceinline__ DeviceQueryResult cuda_intersect_labels(
     const Offset* forward_offset,
     const Vertex* forward_hub,
@@ -2659,16 +2607,10 @@ __global__ void hub_label_query_kernel(
         }
 
         local_checksum =
-            results == nullptr
-                ? cuda_distance_fingerprint(
+            cuda_distance_fingerprint(
                     source_ids[source_index],
                     target_ids[target_index],
-                    result.distance)
-                : cuda_query_fingerprint(
-                    source_ids[source_index],
-                    target_ids[target_index],
-                    result.distance,
-                    result.hub);
+                    result.distance);
 
         local_unreachable =
             result.distance == INF ? 1ULL : 0ULL;
@@ -2683,7 +2625,7 @@ __global__ void hub_label_query_kernel(
          stride >>= 1) {
 
         if (threadIdx.x < stride) {
-            shared_checksum[threadIdx.x] ^=
+            shared_checksum[threadIdx.x] +=
                 shared_checksum[threadIdx.x + stride];
 
             shared_unreachable[threadIdx.x] +=
@@ -3469,17 +3411,11 @@ __global__ void hub_packed_finalize_kernel(
             results[pair_index] = result;
         }
 
-        local_checksum ^=
-            results == nullptr
-                ? cuda_distance_fingerprint(
+        local_checksum +=
+            cuda_distance_fingerprint(
                     source_ids[source_index],
                     target_ids[target_index],
-                    result.distance)
-                : cuda_query_fingerprint(
-                    source_ids[source_index],
-                    target_ids[target_index],
-                    result.distance,
-                    result.hub);
+                    result.distance);
 
         if (result.distance == INF) {
             ++local_unreachable;
@@ -3495,7 +3431,7 @@ __global__ void hub_packed_finalize_kernel(
          stride >>= 1) {
 
         if (threadIdx.x < stride) {
-            shared_checksum[threadIdx.x] ^=
+            shared_checksum[threadIdx.x] +=
                 shared_checksum[threadIdx.x + stride];
 
             shared_unreachable[threadIdx.x] +=
@@ -3550,7 +3486,7 @@ __global__ void hub_distance_finalize_kernel(
                 ? INF
                 : static_cast<Weight>(stored);
 
-        local_checksum ^=
+        local_checksum +=
             cuda_distance_fingerprint(
                 source_ids[source_index],
                 target_ids[target_index],
@@ -3570,7 +3506,7 @@ __global__ void hub_distance_finalize_kernel(
          stride >>= 1) {
 
         if (threadIdx.x < stride) {
-            shared_checksum[threadIdx.x] ^=
+            shared_checksum[threadIdx.x] +=
                 shared_checksum[threadIdx.x + stride];
             shared_unreachable[threadIdx.x] +=
                 shared_unreachable[threadIdx.x + stride];
@@ -3795,7 +3731,7 @@ static CudaQueryBenchmarkStats run_many_to_many_queries_cpu_pair_staged(
                         target_labels,
                         target_index);
 
-                local_checksum ^=
+                local_checksum +=
                     distance_result_fingerprint(
                         sources[static_cast<std::size_t>(source_index)],
                         targets[static_cast<std::size_t>(target_index)],
@@ -3837,7 +3773,7 @@ static CudaQueryBenchmarkStats run_many_to_many_queries_cpu_pair_staged(
                         target_labels,
                         target_index);
 
-                local_checksum ^=
+                local_checksum +=
                     distance_result_fingerprint(
                         sources[static_cast<std::size_t>(source_index)],
                         targets[static_cast<std::size_t>(target_index)],
@@ -3875,7 +3811,7 @@ static CudaQueryBenchmarkStats run_many_to_many_queries_cpu_pair_staged(
         2ULL * sizeof(std::uint64_t);
 
     for (std::size_t i = 0; i < worker_checksums.size(); ++i) {
-        stats.checksum ^= worker_checksums[i];
+        stats.checksum += worker_checksums[i];
         stats.unreachable_count += worker_unreachable[i];
     }
 
@@ -4277,7 +4213,7 @@ static CudaQueryBenchmarkStats run_many_to_many_queries_cuda(
         std::uint64_t unreachable_count = 0;
 
         for (std::size_t i = 0; i < block_checksums.size(); ++i) {
-            checksum ^= static_cast<std::uint64_t>(block_checksums[i]);
+            checksum += static_cast<std::uint64_t>(block_checksums[i]);
             unreachable_count +=
                 static_cast<std::uint64_t>(block_unreachable[i]);
         }
@@ -4341,8 +4277,6 @@ static CudaQueryBenchmarkStats run_many_to_many_queries_cuda(
             << throughput << " pairs/s\n"
             << "end-to-end post-resident-label throughput: "
             << post_preload_throughput << " pairs/s\n"
-            << "checksum mode: "
-            << (quiet ? "distance-only" : "distance+hub") << "\n"
             << "query pairs completed: "
             << pair_count
             << ", unreachable: "
@@ -4996,7 +4930,7 @@ static CudaQueryBenchmarkStats run_many_to_many_queries_cuda_hub(
         std::uint64_t unreachable_count = 0;
 
         for (std::size_t i = 0; i < block_checksums.size(); ++i) {
-            checksum ^=
+            checksum +=
                 static_cast<std::uint64_t>(block_checksums[i]);
             unreachable_count +=
                 static_cast<std::uint64_t>(block_unreachable[i]);
@@ -5097,11 +5031,6 @@ static CudaQueryBenchmarkStats run_many_to_many_queries_cuda_hub(
                     ? "32-bit distance-only (quiet hub-centric)"
                     : "64-bit packed distance+hub")
             << "\n"
-            << "checksum mode: "
-            << (quiet
-                    ? "distance-only"
-                    : "distance+hub")
-            << "\n"
             << "query pairs completed: "
             << pair_count
             << ", unreachable: "
@@ -5143,20 +5072,6 @@ static CudaQueryBenchmarkStats run_many_to_many_queries_cuda_hub(
     }
 
     return stats;
-}
-
-static std::uint64_t derived_benchmark_seed(
-    std::uint64_t base_seed,
-    std::uint64_t index,
-    bool warmup) {
-
-    std::uint64_t value =
-        base_seed ^
-        (warmup
-            ? 0xd1b54a32d192ed03ULL
-            : 0x94d049bb133111ebULL);
-    value ^= (index + 1ULL) * 0x9e3779b97f4a7c15ULL;
-    return mix_query_value(value);
 }
 
 static void write_cuda_benchmark_header(std::ostream& out) {
@@ -5567,7 +5482,7 @@ static void run_random_benchmark(
          warmup_index < warmup_count;
          ++warmup_index) {
         const std::uint64_t query_seed =
-            derived_benchmark_seed(base_seed, warmup_index, true);
+            benchmark_query_seed(base_seed, warmup_index, true);
         std::mt19937_64 generator(query_seed);
         const std::vector<Vertex> sources = generate_random_vertices(
             source_count, labels.num_vertices, generator);
@@ -5587,7 +5502,7 @@ static void run_random_benchmark(
          ++run_index) {
 
         const std::uint64_t query_seed =
-            derived_benchmark_seed(base_seed, run_index, false);
+            benchmark_query_seed(base_seed, run_index, false);
 
         const auto generation_start = std::chrono::steady_clock::now();
         std::mt19937_64 generator(query_seed);

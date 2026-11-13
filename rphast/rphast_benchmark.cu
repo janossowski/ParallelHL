@@ -1401,7 +1401,7 @@ static void run_many_to_many_cpu(
                  ++target_index) {
 
                 const Weight distance = target_distances[target_index];
-                local_checksum ^=
+                local_checksum +=
                     distance_result_fingerprint(
                         source,
                         targets[target_index],
@@ -1462,7 +1462,7 @@ static void run_many_to_many_cpu(
                  ++target_index) {
 
                 const Weight distance = target_distances[target_index];
-                local_checksum ^=
+                local_checksum +=
                     distance_result_fingerprint(
                         source,
                         targets[target_index],
@@ -1488,7 +1488,7 @@ static void run_many_to_many_cpu(
     std::uint64_t checksum = 0;
     std::uint64_t unreachable = 0;
     for (std::size_t i = 0; i < worker_checksums.size(); ++i) {
-        checksum ^= worker_checksums[i];
+        checksum += worker_checksums[i];
         unreachable += worker_unreachable[i];
     }
 
@@ -1883,7 +1883,7 @@ static ParallelCHQueryStats run_many_to_many_parallel_ch(
             const Weight distance = query_workspace.query(
                 ch, source, target, &local_counters);
 
-            local_checksum ^=
+            local_checksum +=
                 distance_result_fingerprint(source, target, distance);
             if (distance == INF) ++local_unreachable;
             if (!quiet) results[static_cast<std::size_t>(pair)] = distance;
@@ -1904,7 +1904,7 @@ static ParallelCHQueryStats run_many_to_many_parallel_ch(
             const Vertex target = targets[static_cast<std::size_t>(target_index)];
             const Weight distance = query_workspace.query(
                 ch, source, target, &local_counters);
-            worker_checksums[0] ^=
+            worker_checksums[0] +=
                 distance_result_fingerprint(source, target, distance);
             if (distance == INF) ++worker_unreachable[0];
             if (!quiet) results[static_cast<std::size_t>(pair)] = distance;
@@ -1918,7 +1918,7 @@ static ParallelCHQueryStats run_many_to_many_parallel_ch(
         std::chrono::duration<double>(end - begin).count();
 
     for (std::size_t i = 0; i < worker_checksums.size(); ++i) {
-        stats.checksum ^= worker_checksums[i];
+        stats.checksum += worker_checksums[i];
         stats.unreachable += worker_unreachable[i];
         stats.forward_settled += worker_counters[i].forward_settled;
         stats.backward_settled += worker_counters[i].backward_settled;
@@ -2191,7 +2191,7 @@ __global__ void g32_finalize_kernel(
             static_cast<std::uint64_t>(local_target) * G32_SOURCE_LANES + lane];
         const Vertex target = target_ids[target_index];
 
-        checksum ^= device_distance_fingerprint(source, target, result);
+        checksum += device_distance_fingerprint(source, target, result);
         if (result == INF) {
             ++unreachable;
         }
@@ -2304,7 +2304,7 @@ __global__ void rphast_rank_sweep_kernel(
         const Vertex target = target_ids[target_index];
         const Weight result = distance[target];
 
-        checksum ^=
+        checksum +=
             device_distance_fingerprint(source, target, result);
         if (result == INF) {
             ++unreachable;
@@ -2628,7 +2628,7 @@ static void run_many_to_many_cuda(
 
         const auto reduce_begin = Clock::now();
         for (std::size_t i = 0; i < current_batch; ++i) {
-            checksum ^= static_cast<std::uint64_t>(batch_checksums[i]);
+            checksum += static_cast<std::uint64_t>(batch_checksums[i]);
             unreachable += static_cast<std::uint64_t>(batch_unreachable[i]);
         }
         const auto reduce_end = Clock::now();
@@ -3210,7 +3210,7 @@ static void run_many_to_many_cuda_g32(
 
         const auto reduce_begin = Clock::now();
         for (std::size_t lane = 0; lane < current_batch; ++lane) {
-            checksum ^= static_cast<std::uint64_t>(batch_checksums[lane]);
+            checksum += static_cast<std::uint64_t>(batch_checksums[lane]);
             unreachable +=
                 static_cast<std::uint64_t>(batch_unreachable[lane]);
         }
@@ -3845,7 +3845,7 @@ static G32OptimizedQueryStats run_many_to_many_cuda_g32_optimized(
 
         const auto reduce_begin = Clock::now();
         for (std::size_t lane = 0; lane < current_batch; ++lane) {
-            checksum ^= static_cast<std::uint64_t>(batch_checksums[lane]);
+            checksum += static_cast<std::uint64_t>(batch_checksums[lane]);
             unreachable += static_cast<std::uint64_t>(batch_unreachable[lane]);
         }
         const auto reduce_end = Clock::now();
@@ -4048,18 +4048,6 @@ static void write_g32_benchmark_csv_header(std::ostream& out) {
         << "seed_buffer_peak_bytes,restricted_h2d_bytes,dynamic_h2d_bytes,stats_d2h_bytes,"
         << "result_d2h_bytes,ch_forward_settled,ch_backward_settled,ch_relaxed_arcs,"
         << "ch_pair_workspace_bytes\n";
-}
-
-static std::uint64_t benchmark_query_seed(
-    std::uint64_t base_seed,
-    std::uint64_t index,
-    bool warmup) {
-
-    const std::uint64_t domain = warmup
-        ? 0x6a09e667f3bcc909ULL
-        : 0xbb67ae8584caa73bULL;
-    return mix_query_value(
-        base_seed ^ domain ^ mix_query_value(index + 0x9e3779b97f4a7c15ULL));
 }
 
 static void write_g32_benchmark_csv_row(

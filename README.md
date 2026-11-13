@@ -29,8 +29,9 @@ common/                  --> code shared by hl/ and rphast/
     file parsing (`read_vertex_id_file()`), CSV field escaping
     (`csv_escape()`).
   - `query_utils.hpp` — random query generation
-    (`generate_random_vertices()`) and result-checksum helpers
-    (`mix_query_value()`, `distance_result_fingerprint()`).
+    (`generate_random_vertices()`, `benchmark_query_seed()`) and
+    result-checksum helpers (`mix_query_value()`,
+    `distance_result_fingerprint()`).
   - `cuda_utils.cuh` — `cuda_check()`, a thin CUDA error-checking helper;
     inert outside `nvcc` builds.
 
@@ -60,3 +61,10 @@ for a specific GPU architecture.)
 
 ./bin/rphast_benchmark query graph.ch.txt sources.txt targets.txt --backend cpu
 ```
+
+## Result checksums
+
+All backends report the same checksum for the same queries: the wrapping
+64-bit sum of `distance_result_fingerprint(source, target, distance)` over all
+pairs. Both `benchmark` modes derive queries with `benchmark_query_seed()`, so
+equal `--seed`, `|S|`, `|T|` and run index give identical query sets.

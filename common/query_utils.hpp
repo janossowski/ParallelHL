@@ -39,6 +39,20 @@ inline std::uint64_t distance_result_fingerprint(
 }
 
 
+// Shared by both benchmark tools so equal seeds produce equal queries.
+inline std::uint64_t benchmark_query_seed(
+    std::uint64_t base_seed,
+    std::uint64_t index,
+    bool warmup) {
+
+    const std::uint64_t domain = warmup
+        ? 0x6a09e667f3bcc909ULL
+        : 0xbb67ae8584caa73bULL;
+    return mix_query_value(
+        base_seed ^ domain ^ mix_query_value(index + 0x9e3779b97f4a7c15ULL));
+}
+
+
 inline std::vector<Vertex> generate_random_vertices(
     std::size_t count,
     std::size_t vertex_count,
